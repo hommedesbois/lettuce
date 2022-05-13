@@ -104,6 +104,7 @@ class EnergySpectrum(Observable):
             return self._ekin_spectrum_torch_ge_18(u)
         else:
             return self._ekin_spectrum_torch_lt_18(u)
+            
 
     def _ekin_spectrum_torch_lt_18(self, u):
         zeros = torch.zeros(self.dimensions, dtype=self.lattice.dtype, device=self.lattice.device)[..., None]

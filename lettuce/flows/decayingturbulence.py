@@ -8,6 +8,8 @@ energy_spectrum: returns a pair [spectrum, wavenumbers]
 """
 
 import numpy as np
+
+import warnings
 from lettuce.unit import UnitConversion
 
 
@@ -49,6 +51,7 @@ class DecayingTurbulence:
 
     def _generate_initial_velocity(self, ek, wavenumber):
         dx = self.units.convert_length_to_pu(1.0)
+        np.random.seed(10)
         u = np.random.random(np.array(wavenumber).shape) * 2 * np.pi + 0j
         u = [np.fft.fftn(u[dim], axes=tuple((np.arange(self.units.lattice.D)))) for dim in range(self.units.lattice.D)]
 
@@ -91,6 +94,7 @@ class DecayingTurbulence:
         e_kin = np.sum(e_kin) * .5
 
         factor = np.sqrt(self.ic_energy / e_kin)
+
         u_real = [u_real[dim] * factor for dim in range(self.units.lattice.D)]
         u_imag = [u_imag[dim] * factor for dim in range(self.units.lattice.D)]
 

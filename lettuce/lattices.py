@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from lettuce.util import LettuceException
-from lettuce.equilibrium import QuadraticEquilibrium
+from lettuce.equilibrium import *
 
 __all__ = ["Lattice"]
 
@@ -26,8 +26,13 @@ class Lattice:
         self.dtype = dtype
         self.e = self.convert_to_tensor(stencil.e)
         self.w = self.convert_to_tensor(stencil.w)
+        self.Hxxy = self.convert_to_tensor(stencil.Hxxy)
+        self.Hxyy = self.convert_to_tensor(stencil.Hxyy)
+        self.Hxxyy = self.convert_to_tensor(stencil.Hxxyy)
         self.cs = self.convert_to_tensor(stencil.cs)
-        self.equilibrium = QuadraticEquilibrium(self)
+        self.equilibrium = FourthOrderEquilibrium(self)
+        #self.equilibrium = QuadraticEquilibrium(self)
+
 
     def __str__(self):
         return f"Lattice (stencil {self.stencil.__name__}; device {self.device}; dtype {self.dtype})"

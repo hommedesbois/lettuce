@@ -4,11 +4,11 @@ Collision models
 
 import torch
 
-from lettuce.equilibrium import QuadraticEquilibrium
+from lettuce.equilibrium import *
 from lettuce.util import LettuceException
 
 __all__ = [
-    "BGKCollision", "KBCCollision2D", "KBCCollision3D", "MRTCollision", "RegularizedCollision",
+    "BGKCollision", "KBCCollision2D", "KBCCollision3D", "MRTCollision", "CMCollision", "RegularizedCollision",
     "SmagorinskyCollision", "TRTCollision", "BGKInitialization"
 ]
 
@@ -47,6 +47,22 @@ class MRTCollision:
         f = self.transform.inverse_transform(m)
         return f
 
+class CMCollision:
+    """Non-orthogonal central moments relaxing to a discrete equilibrium: \
+       A D2Q9 Boltzmann model (De Rosis 2016)
+    """
+
+    def __init__(self, lattice, transform, relaxation_parameters):
+        self.lattice = lattice
+        self.transform = transform
+        self.relaxation_parameters = lattice.convert_to_tensor(relaxation_parameters)
+
+    def __call__(self, f):
+        m, cm = self.transform.transform(f)
+        cmeq = self.transform.equilibrium(cm)
+        cm = cm - self.lattice.einsum("q,q->q", [1 / self.relaxation_parameters, cm - cmeq]) # computes k*
+        f = self.transform.inverse_transform(m, cm) # I need m only for the velocities ux and uy
+        return f
 
 class TRTCollision:
     """Two relaxation time collision model - standard implementation (cf. Krüger 2017)
@@ -309,7 +325,8 @@ class BGKInitialization:
         self.moment_transformation = moment_transformation
         p, u = flow.initial_solution(flow.grid)
         self.u = flow.units.convert_velocity_to_lu(lattice.convert_to_tensor(u))
-        self.rho0 = flow.units.characteristic_density_lu
+        self.rho0 = flow.units.characteristic_density_lu 
+        #self.equilibrium = FourthOrderEquilibrium(self.lattice)
         self.equilibrium = QuadraticEquilibrium(self.lattice)
         momentum_names = tuple([f"j{x}" for x in "xyz"[:self.lattice.D]])
         self.momentum_indices = moment_transformation[momentum_names]

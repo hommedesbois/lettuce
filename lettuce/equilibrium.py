@@ -1,7 +1,7 @@
 import torch
 
 __all__ = ["Equilibrium", "QuadraticEquilibrium", "IncompressibleQuadraticEquilibrium",
-           "QuadraticEquilibrium_LessMemory"]
+           "QuadraticEquilibrium_LessMemory", "FourthOrderEquilibrium"]
 
 
 class Equilibrium:
@@ -55,5 +55,24 @@ class IncompressibleQuadraticEquilibrium(Equilibrium):
             [self.lattice.w,
              rho
              + self.rho0 * ((2 * exu - uxu) / (2 * self.lattice.cs ** 2) + 0.5 * (exu / (self.lattice.cs ** 2)) ** 2)]
+        )
+        return feq
+
+
+class FourthOrderEquilibrium(Equilibrium):
+    def __init__(self, lattice):
+        self.lattice = lattice
+
+    def __call__(self,rho,u, *args):
+        exu = torch.tensordot(self.lattice.e, u, dims=1)
+        udotu = self.lattice.einsum("d,d->", [u, u])
+        uxu = self.lattice.einsum("q,q->q", [u, u])
+        H3_1 = self.lattice.einsum("q,xy->qxy", [self.lattice.Hxxy, uxu[0]*u[1]])
+        H3_2 = self.lattice.einsum("q,xy->qxy", [self.lattice.Hxyy, uxu[1]*u[0]])
+        H4 = self.lattice.einsum("q,xy->qxy", [self.lattice.Hxxyy, uxu[0]*uxu[1]])
+        feq = self.lattice.einsum(
+            "q,q->q",
+            [self.lattice.w,
+             rho * (1 + (2 * exu - udotu) / (2 * self.lattice.cs ** 2) + 0.5 * (exu / (self.lattice.cs ** 2)) ** 2 + 1/(2*self.lattice.cs**6)*(H3_1+H3_2) + 1/(4*self.lattice.cs**8)*H4)]
         )
         return feq

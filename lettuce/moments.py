@@ -5,13 +5,14 @@ Moments and cumulants of the distribution function.
 import warnings
 import torch
 import lettuce
+from lettuce.equilibrium import *
 from lettuce.util import LettuceException, InefficientCodeWarning, get_subclasses, ExperimentalWarning
 from lettuce.stencils import Stencil, D1Q3, D2Q9, D3Q27
 import numpy as np
 
 __all__ = [
     "moment_tensor", "get_default_moment_transform", "Moments", "Transform", "D1Q3Transform",
-    "D2Q9Lallemand", "D2Q9Dellar", "D3Q27Hermite"
+    "D2Q9Lallemand", "D2Q9Dellar", "D2Q9Cascaded", "D3Q27Hermite"
 ]
 
 _ALL_STENCILS = get_subclasses(Stencil, module=lettuce)
@@ -228,6 +229,101 @@ class D2Q9Lallemand(Transform):
         meq[7] = qy
         meq[8] = eps
         return meq
+
+
+class D2Q9Cascaded(Transform):
+    matrix = np.array(
+        [[1, 1, 1, 1, 1, 1, 1, 1, 1],
+         [0, 1, 0, -1, 0, 1, -1, -1, 1],
+         [0, 0, 1, 0, -1, 1, 1, -1, -1],
+         [0, 1, 0, 1, 0, 1, 1, 1, 1],
+         [0, 0, 1, 0, 1, 1, 1, 1, 1],
+         [0, 0, 0, 0, 0, 1, -1, 1, -1],
+         [0, 0, 0, 0, 0, 1, 1, -1, -1],
+         [0, 0, 0, 0, 0, 1, -1, -1, 1],
+         [0, 0, 0, 0, 0, 1, 1, 1, 1]]
+    )
+
+    names = ['rho', 'jx', 'jy', 'Pi_xx', 'Pi_yy', 'Pi_xy', 'Qxxy', 'Qxyy', 'Axxyy']
+    supported_stencils = [D2Q9]
+
+    def __init__(self, lattice):
+        super(D2Q9Cascaded, self).__init__(
+            lattice, self.names
+        )
+        
+        self.matrix = self.lattice.convert_to_tensor(self.matrix)
+
+    def transform(self, f):
+        cm = torch.zeros_like(f)
+        m = self.lattice.mv(self.matrix, f)
+
+        rho = m[0]
+        ux = m[1]/rho
+        uy = m[2]/rho
+
+        cm[0] = rho
+        cm[1] = 0
+        cm[2] = 0
+        cm[3] = m[3] + m[4] - rho * (ux**2 + uy**2)
+        cm[4] = m[3] - m[4] - rho * (ux**2 - uy**2)
+        cm[5] = m[5] - rho * ux * uy
+        
+        return m, cm
+
+    def equilibrium(self, cm):
+        cmeq = torch.zeros_like(cm)
+
+        rho = cm[0]
+        if self.lattice.equilibrium==FourthOrderEquilibrium():
+            cmeq[0] = rho
+            cmeq[1] = 0
+            cmeq[2] = 0
+            cmeq[3] = 2 * rho / 3
+            cmeq[4] = 0
+            cmeq[5] = 0
+            cmeq[6] = 0
+            cmeq[7] = 0
+            cmeq[8] = rho * 1 / 9
+        else:        
+            LettuceException(f"Cascaded LBM is only implemented for fourth \
+                order equilibrium funciton")
+
+    def inverse_transform(self, m, cm):
+        f = torch.zeros_like(m)
+        
+        rho = cm[0]
+        ux = m[1]/rho
+        uy = m[2]/rho
+        k3 = cm[3]
+        k4 = cm[4]
+        k5 = cm[5]
+
+
+        f[0] = k3*(ux**2 + uy**2 - 2)/2 - k4*(ux**2 - uy**2)/2 + 4*k5*ux*uy \
+             + rho*(ux**2*uy**2 - ux**2 - uy**2 + 1) + rho/9
+        f[1] = -k3*(ux**2 + ux + uy**2 - 1)/4 + k4*(ux**2 + ux - uy**2 + 1)/4 \
+             - k5*uy*(2*ux + 1) - rho*ux*(ux*uy**2 - ux + uy**2 - 1)/2 - rho/18
+        f[2] = -k3*(ux**2 + uy**2 + uy - 1)/4 - k4*(-ux**2 + uy**2 + uy + 1)/4 \
+             - k5*ux*(2*uy + 1) - rho*uy*(ux**2*uy + ux**2 - uy - 1)/2 - rho/18
+        f[3] = -k3*(ux**2 - ux + uy**2 - 1)/4 + k4*(ux**2 - ux - uy**2 + 1)/4 \
+             - k5*uy*(2*ux - 1) - rho*ux*(ux*uy**2 - ux - uy**2 + 1)/2 - rho/18
+        f[4] = -k3*(ux**2 + uy**2 - uy - 1)/4 + k4*(ux**2 - uy**2 + uy - 1)/4 \
+             - k5*ux*(2*uy - 1) - rho*uy*(ux**2*uy - ux**2 - uy + 1)/2 - rho/18
+        f[5] = k3*(ux**2 + ux + uy**2 + uy)/8 - k4*(ux**2 + ux - uy**2 - uy)/8 \
+             + k5*(4*ux*uy + 2*ux + 2*uy + 1)/4 + rho*ux*uy*(ux*uy + ux + uy + 1)/4 \
+             + rho/36
+        f[6] = k3*(ux**2 - ux + uy**2 + uy)/8 + k4*(-ux**2 + ux + uy**2 + uy)/8 \
+             + k5*(4*ux*uy + 2*ux - 2*uy - 1)/4 + rho*ux*uy*(ux*uy + ux - uy - 1)/4 \
+             + rho/36
+        f[7] = k3*(ux**2 - ux + uy**2 - uy)/8 - k4*(ux**2 - ux - uy**2 + uy)/8 \
+             + k5*(4*ux*uy - 2*ux - 2*uy + 1)/4 + rho*ux*uy*(ux*uy - ux - uy + 1)/4 \
+             + rho/36
+        f[8] = k3*(ux**2 + ux + uy**2 - uy)/8 - k4*(ux**2 + ux - uy**2 + uy)/8 \
+             + k5*(4*ux*uy - 2*ux + 2*uy - 1)/4 + rho*ux*uy*(ux*uy - ux + uy - 1)/4 \
+             + rho/36
+
+        return f
 
 
 """
