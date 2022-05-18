@@ -275,7 +275,7 @@ class D2Q9Cascaded(Transform):
         cmeq = torch.zeros_like(cm)
 
         rho = cm[0]
-        if self.lattice.equilibrium==FourthOrderEquilibrium():
+        if self.lattice.equilibrium.__class__==FourthOrderEquilibrium:
             cmeq[0] = rho
             cmeq[1] = 0
             cmeq[2] = 0
@@ -288,7 +288,9 @@ class D2Q9Cascaded(Transform):
         else:        
             LettuceException(f"Cascaded LBM is only implemented for fourth \
                 order equilibrium funciton")
-
+    
+        return cmeq
+    
     def inverse_transform(self, m, cm):
         f = torch.zeros_like(m)
         
