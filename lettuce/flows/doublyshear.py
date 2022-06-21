@@ -34,6 +34,36 @@ class DoublyPeriodicShear2D:
         u = np.stack([u1, u2], axis=0)
         p = np.zeros_like(u1[None, ...])
         return p, u
+    
+    def load_ns_solution(self, filename):
+
+        res = self.resolution
+
+        rho = np.loadtxt(filename, delimiter = " ", skiprows=1, usecols = 0)
+        factor = int(np.sqrt(np.shape(rho)[0])/res)
+        rho = rho.reshape((res*factor, res*factor))
+
+        u1 = np.loadtxt(filename, delimiter = " ", skiprows=1, usecols = 1).reshape((res*factor, res*factor))
+        u2 = np.loadtxt(filename, delimiter = " ", skiprows=1, usecols = 2).reshape((res*factor, res*factor))
+
+        sxx = np.loadtxt(filename, delimiter = " ", skiprows=1, usecols = 3).reshape((res*factor, res*factor))
+        syy = np.loadtxt(filename, delimiter = " ", skiprows=1, usecols = 4).reshape((res*factor, res*factor))
+        sxy = np.loadtxt(filename, delimiter = " ", skiprows=1, usecols = 5).reshape((res*factor, res*factor))
+
+        rho = rho[::factor, ::factor]
+        u1 = u1[::factor, ::factor]
+        u2 = u2[::factor, ::factor]
+
+        sxx = sxx[::factor, ::factor]
+        syy = syy[::factor, ::factor]
+        sxy = sxy[::factor, ::factor]
+
+
+        #rho = np.stack([rho], axis=0)
+        rho = rho[None, ...]
+        u = np.stack([u1, u2], axis=0)
+        s = np.stack([sxx, syy, sxy], axis=0)
+        return rho, u, s
 
     @property
     def grid(self):

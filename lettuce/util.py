@@ -8,7 +8,7 @@ import torch
 __all__ = [
     "LettuceException", "LettuceWarning", "InefficientCodeWarning", "ExperimentalWarning",
     "get_subclasses", "torch_gradient", "torch_jacobi", "grid_fine_to_coarse", "pressure_poisson",
-    "append_axes"
+    "append_axes", "vorticity", "loss_function", 
 ]
 
 
@@ -200,3 +200,14 @@ def pressure_poisson(units, u, rho0, tol_abs=1e-10, max_num_steps=100000):
 def append_axes(array, n):
     index = (Ellipsis, ) + (None, ) * n
     return array[index]
+
+
+def vorticity(u):
+    grad_u0 = torch_gradient(u[0], 1)
+    grad_u1 = torch_gradient(u[1], 1)
+    return (grad_u1[0] - grad_u0[1])
+
+
+def loss_function(x,y):
+    # return torch.sqrt((x-y)**2).sum()
+    return ((x - y) ** 2).sum()

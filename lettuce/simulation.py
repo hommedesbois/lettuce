@@ -69,6 +69,7 @@ class Simulation:
             self._report()
         for _ in range(num_steps):
             # Perform the collision routine everywhere, expect where the no_collision_mask is true
+            #if self.i != 0: # After initialization with feq first step should be streaming 
             self.f = torch.where(self.no_collision_mask, self.f, self.collision(self.f))
             self.f = self.streaming(self.f)
             for boundary in self._boundaries:
@@ -129,7 +130,7 @@ class Simulation:
 
         grad_u0 = torch_gradient(u[0], dx=1, order=6)[None, ...]
         grad_u1 = torch_gradient(u[1], dx=1, order=6)[None, ...]
-        S = torch.cat([grad_u0, grad_u1])
+        S = torch.cat([grad_u0, grad_u1]) # this is not the strain rate tensor S 
 
         if self.lattice.D == 3:
             grad_u2 = torch_gradient(u[2], dx=1, order=6)[None, ...]
@@ -143,6 +144,57 @@ class Simulation:
 
         feq = self.lattice.equilibrium(rho, u)
         self.f = feq - fneq
+
+    def initialize_f_col_from_ns(self, filename):
+        
+        f = torch.zeros_like(self.f) # m not defined
+        
+        # load ns data in lattice units
+        rho, u, _ = self.flow.load_ns_solution(filename)
+
+        rho = self.lattice.convert_to_tensor(rho)
+        u = self.lattice.convert_to_tensor(u)
+
+        grad_u0 = torch_gradient(u[0], dx=1, order=4)[None, ...]
+        grad_u1 = torch_gradient(u[1], dx=1, order=4)[None, ...]
+        
+        grad_u = torch.cat([grad_u0, grad_u1])
+        S = 0.5 * (grad_u + torch.transpose(grad_u, 0, 1))
+
+        Pi_1 = - 1.0 * self.flow.units.relaxation_parameter_lu * rho * S / self.lattice.cs ** 2
+ 
+        ux = u[0]
+        uy = u[1]
+        k3 = 2/3 * rho + Pi_1[0,0,:,:] + Pi_1[1,1,:,:]  # Pi_1 is not in central framework !!!
+        k4 = Pi_1[0,0,:,:] - Pi_1[1,1,:,:] 
+        k5 = Pi_1[0,1,:,:]
+
+        f[0] = k3*(ux**2 + uy**2 - 2)/2 - k4*(ux**2 - uy**2)/2 + 4*k5*ux*uy \
+             + rho*(ux**2*uy**2 - ux**2 - uy**2 + 1) + rho/9
+        f[1] = -k3*(ux**2 + ux + uy**2 - 1)/4 + k4*(ux**2 + ux - uy**2 + 1)/4 \
+             - k5*uy*(2*ux + 1) - rho*ux*(ux*uy**2 - ux + uy**2 - 1)/2 - rho/18
+        f[2] = -k3*(ux**2 + uy**2 + uy - 1)/4 - k4*(-ux**2 + uy**2 + uy + 1)/4 \
+             - k5*ux*(2*uy + 1) - rho*uy*(ux**2*uy + ux**2 - uy - 1)/2 - rho/18
+        f[3] = -k3*(ux**2 - ux + uy**2 - 1)/4 + k4*(ux**2 - ux - uy**2 + 1)/4 \
+             - k5*uy*(2*ux - 1) - rho*ux*(ux*uy**2 - ux - uy**2 + 1)/2 - rho/18
+        f[4] = -k3*(ux**2 + uy**2 - uy - 1)/4 + k4*(ux**2 - uy**2 + uy - 1)/4 \
+             - k5*ux*(2*uy - 1) - rho*uy*(ux**2*uy - ux**2 - uy + 1)/2 - rho/18
+        f[5] = k3*(ux**2 + ux + uy**2 + uy)/8 - k4*(ux**2 + ux - uy**2 - uy)/8 \
+             + k5*(4*ux*uy + 2*ux + 2*uy + 1)/4 + rho*ux*uy*(ux*uy + ux + uy + 1)/4 \
+             + rho/36
+        f[6] = k3*(ux**2 - ux + uy**2 + uy)/8 + k4*(-ux**2 + ux + uy**2 + uy)/8 \
+             + k5*(4*ux*uy + 2*ux - 2*uy - 1)/4 + rho*ux*uy*(ux*uy + ux - uy - 1)/4 \
+             + rho/36
+        f[7] = k3*(ux**2 - ux + uy**2 - uy)/8 - k4*(ux**2 - ux - uy**2 + uy)/8 \
+             + k5*(4*ux*uy - 2*ux - 2*uy + 1)/4 + rho*ux*uy*(ux*uy - ux - uy + 1)/4 \
+             + rho/36
+        f[8] = k3*(ux**2 + ux + uy**2 - uy)/8 - k4*(ux**2 + ux - uy**2 + uy)/8 \
+             + k5*(4*ux*uy - 2*ux + 2*uy - 1)/4 + rho*ux*uy*(ux*uy - ux + uy - 1)/4 \
+             + rho/36
+
+        self.f = f
+
+
 
     def save_checkpoint(self, filename):
         """Write f as np.array using pickle module."""
