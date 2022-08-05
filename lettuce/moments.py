@@ -12,7 +12,7 @@ import numpy as np
 
 __all__ = [
     "moment_tensor", "get_default_moment_transform", "Moments", "Transform", "D1Q3Transform",
-    "D2Q9Lallemand", "D2Q9Dellar", "D2Q9Cascaded", "D3Q27Hermite"
+    "D2Q9Lallemand", "D2Q9Dellar", "D2Q9NonOrthoCascadedCM", "D2Q9NonOrthoCM", "D3Q27Hermite"
 ]
 
 _ALL_STENCILS = get_subclasses(Stencil, module=lettuce)
@@ -231,7 +231,7 @@ class D2Q9Lallemand(Transform):
         return meq
 
 
-class D2Q9Cascaded(Transform):
+class D2Q9NonOrthoCascadedCM(Transform):
     matrix = np.array(
         [[1, 1, 1, 1, 1, 1, 1, 1, 1],
          [0, 1, 0, -1, 0, 1, -1, -1, 1],
@@ -248,7 +248,7 @@ class D2Q9Cascaded(Transform):
     supported_stencils = [D2Q9]
 
     def __init__(self, lattice):
-        super(D2Q9Cascaded, self).__init__(
+        super(D2Q9NonOrthoCascadedCM, self).__init__(
             lattice, self.names
         )
         
@@ -327,6 +327,107 @@ class D2Q9Cascaded(Transform):
 
         return f
 
+
+class D2Q9NonOrthoCM(Transform):
+    matrix = np.array(
+        [[1, 1, 1, 1, 1, 1, 1, 1, 1],
+         [0, 1, 0, -1, 0, 1, -1, -1, 1],
+         [0, 0, 1, 0, -1, 1, 1, -1, -1],
+         [0, 1, 0, 1, 0, 1, 1, 1, 1],
+         [0, 0, 1, 0, 1, 1, 1, 1, 1],
+         [0, 0, 0, 0, 0, 1, -1, 1, -1],
+         [0, 0, 0, 0, 0, 1, 1, -1, -1],
+         [0, 0, 0, 0, 0, 1, -1, -1, 1],
+         [0, 0, 0, 0, 0, 1, 1, 1, 1]]
+    )
+
+    names = ['rho', 'jx', 'jy', 'Pi_xx', 'Pi_yy', 'Pi_xy', 'Qxxy', 'Qxyy', 'Axxyy']
+    supported_stencils = [D2Q9]
+
+    def __init__(self, lattice):
+        super(D2Q9NonOrthoCM, self).__init__(
+            lattice, self.names
+        )
+        
+        self.matrix = self.lattice.convert_to_tensor(self.matrix)
+
+    def transform(self, f):
+        cm = torch.zeros_like(f)
+        m = self.lattice.mv(self.matrix, f)
+
+        rho = m[0]
+        ux = m[1]/rho
+        uy = m[2]/rho
+
+        cm[0] = rho
+        cm[1] = 0
+        cm[2] = 0
+        cm[3] = m[3] - rho * ux**2 
+        cm[4] = m[4] - rho * uy**2
+        cm[5] = m[5] - rho * ux * uy
+        
+        return m, cm
+
+    def equilibrium(self, cm):
+        cmeq = torch.zeros_like(cm)
+
+        rho = cm[0]
+        if self.lattice.equilibrium.__class__==FourthOrderEquilibrium:
+            cmeq[0] = rho
+            cmeq[1] = 0
+            cmeq[2] = 0
+            cmeq[3] = rho / 3
+            cmeq[4] = rho / 3
+            cmeq[5] = 0
+            cmeq[6] = 0
+            cmeq[7] = 0
+            cmeq[8] = rho * 1 / 9
+        else:        
+            LettuceException(f"Cascaded LBM is only implemented for fourth \
+                order equilibrium funciton")
+    
+        return cmeq
+    
+    def inverse_transform(self, m, cm):
+        f = torch.zeros_like(m)
+        
+        rho = cm[0]
+        ux = m[1]/rho
+        uy = m[2]/rho
+        k3 = cm[3]
+        k4 = cm[4]
+        k5 = cm[5]
+
+
+        f[0] =  k3*(uy**2 - 1) + k4*(ux**2 - 1) + 4*k5*ux*uy + \
+            rho*(ux**2*uy**2 - ux**2 - uy**2 + 1) + rho/9  
+
+        f[1] = -k3*(uy**2 - 1)/2 - k4*ux*(ux + 1)/2 - k5*uy*(2*ux + 1) - \
+            rho*ux*(ux*uy**2 - ux + uy**2 - 1)/2 - rho/18
+
+        f[2] = -k3*uy*(uy + 1)/2 - k4*(ux**2 - 1)/2 - k5*ux*(2*uy + 1) - \
+            rho*uy*(ux**2*uy + ux**2 - uy - 1)/2 - rho/18
+
+        f[3] = -k3*(uy**2 - 1)/2 - k4*ux*(ux - 1)/2 - k5*uy*(2*ux - 1) - \
+            rho*ux*(ux*uy**2 - ux - uy**2 + 1)/2 - rho/18
+
+        f[4] = -k3*uy*(uy - 1)/2 - k4*(ux**2 - 1)/2 - k5*ux*(2*uy - 1) - \
+            rho*uy*(ux**2*uy - ux**2 - uy + 1)/2 - rho/18
+
+        f[5] =  k3*uy*(uy + 1)/4 + k4*ux*(ux + 1)/4 + k5*(4*ux*uy + 2*ux + 2*uy + 1)/4 + \
+            rho*ux*uy*(ux*uy + ux + uy + 1)/4 + rho/36
+ 
+        f[6] =  k3*uy*(uy + 1)/4 + k4*ux*(ux - 1)/4 + k5*(4*ux*uy + 2*ux - 2*uy - 1)/4 + \
+            rho*ux*uy*(ux*uy + ux - uy - 1)/4 + rho/36
+
+        f[7] =  k3*uy*(uy - 1)/4 + k4*ux*(ux - 1)/4 + k5*(4*ux*uy - 2*ux - 2*uy + 1)/4 + \
+            rho*ux*uy*(ux*uy - ux - uy + 1)/4 + rho/36
+
+        f[8] =  k3*uy*(uy - 1)/4 + k4*ux*(ux + 1)/4 + k5*(4*ux*uy - 2*ux + 2*uy - 1)/4 + \
+            rho*ux*uy*(ux*uy - ux + uy - 1)/4 + rho/36
+
+
+        return f
 
 """
 D3Q19 is not implemented, yet. Also, the moments should be ordered so that 1...D+1 correspond to momentum,

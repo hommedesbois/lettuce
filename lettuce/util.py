@@ -197,6 +197,55 @@ def pressure_poisson(units, u, rho0, tol_abs=1e-10, max_num_steps=100000):
     return units.convert_pressure_pu_to_density_lu(p_mod)
 
 
+def pressure_poisson_init(units, lattice, u, rho0, tol_abs=1e-10, max_num_steps=100000):
+    """
+    Solve the pressure poisson equation using a jacobi scheme.
+
+    Parameters
+    ----------
+    units : lettuce.UnitConversion
+        The flow instance.
+    u : torch.Tensor
+        The velocity tensor.
+    rho0 : torch.Tensor
+        Initial guess for the density (i.e., pressure).
+    tol_abs : float
+        The tolerance for pressure convergence.
+
+
+    Returns
+    -------
+    rho : torch.Tensor
+        The converged density (i.e., pressure).
+    """
+    # convert to physical units
+    dx = units.convert_length_to_pu(1.0)
+    u = lattice.convert_to_tensor(u)
+    p = units.convert_density_lu_to_pressure_pu(units.convert_density_to_lu(rho0))
+    p = lattice.convert_to_tensor(p)
+
+    # compute laplacian
+    with torch.no_grad():
+        u_mod = torch.zeros_like(u[0])
+        dim = u.shape[0]
+        for i in range(dim):
+            for j in range(dim):
+                derivative = torch_gradient(torch_gradient(u[i] * u[j], dx)[i], dx)[j]
+                u_mod -= derivative
+    # TODO(@MCBs): still not working in 3D
+
+    p_mod = torch_jacobi(
+        u_mod,
+        p[0],
+        dx,
+        units.lattice.device,
+        dim=units.lattice.D,
+        tol_abs=tol_abs,
+        max_num_steps=max_num_steps
+    )[None, ...]
+
+    return units.convert_density_to_pu(units.convert_pressure_pu_to_density_lu(p_mod))
+
 def append_axes(array, n):
     index = (Ellipsis, ) + (None, ) * n
     return array[index]

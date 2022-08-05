@@ -22,7 +22,7 @@ class DecayingTurbulence:
         self.units = UnitConversion(
             lattice,
             reynolds_number=reynolds_number, mach_number=mach_number,
-            characteristic_length_lu=resolution, characteristic_length_pu=2 * np.pi,
+            characteristic_length_lu=resolution, characteristic_length_pu=1,
             characteristic_velocity_pu=None
         )
         self.wavenumbers = []
@@ -125,9 +125,9 @@ class DecayingTurbulence:
 
     @property
     def grid(self):
-        grid = [np.linspace(0, 2 * np.pi, num=self.resolution, endpoint=False) for _ in range(self.units.lattice.D)]
+        grid = [np.linspace(0, 1, num=self.resolution, endpoint=False) for _ in range(self.units.lattice.D)]
         return np.meshgrid(*grid)
-
+        
     @property
     def boundaries(self):
         return []

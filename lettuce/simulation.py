@@ -69,8 +69,8 @@ class Simulation:
             self._report()
         for _ in range(num_steps):
             # Perform the collision routine everywhere, expect where the no_collision_mask is true
-            #if self.i != 0: # After initialization with feq first step should be streaming 
-            self.f = torch.where(self.no_collision_mask, self.f, self.collision(self.f))
+            if self.i != 0: # After initialization with feq first step should be streaming 
+                self.f = torch.where(self.no_collision_mask, self.f, self.collision(self.f))
             self.f = self.streaming(self.f)
             for boundary in self._boundaries:
                 self.f = boundary(self.f)
@@ -145,13 +145,19 @@ class Simulation:
         feq = self.lattice.equilibrium(rho, u)
         self.f = feq - fneq
 
-    def initialize_f_col_from_ns(self, filename):
+    def initialize_f_col_from_macro(self, filename, it):
         
-        f = torch.zeros_like(self.f) # m not defined
+        f = torch.zeros_like(self.f)
         
         # load ns data in lattice units
-        rho, u, _ = self.flow.load_ns_solution(filename)
-
+        if filename == None:
+            grid = self.flow.grid
+            rho, u = self.flow.analytical_solution(grid, it)
+            rho = self.flow.units.convert_density_to_lu(rho)
+            u = self.flow.units.convert_velocity_to_lu(u)
+        else:
+            rho, u = self.flow.load_ns_solution(filename)
+        
         rho = self.lattice.convert_to_tensor(rho)
         u = self.lattice.convert_to_tensor(u)
 
@@ -165,7 +171,7 @@ class Simulation:
  
         ux = u[0]
         uy = u[1]
-        k3 = 2/3 * rho + Pi_1[0,0,:,:] + Pi_1[1,1,:,:]  # Pi_1 is not in central framework !!!
+        k3 = 2/3 * rho + Pi_1[0,0,:,:] + Pi_1[1,1,:,:] 
         k4 = Pi_1[0,0,:,:] - Pi_1[1,1,:,:] 
         k5 = Pi_1[0,1,:,:]
 

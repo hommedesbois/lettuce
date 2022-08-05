@@ -9,7 +9,7 @@ from lettuce.util import LettuceException
 
 __all__ = [
     "BGKCollision", "KBCCollision2D", "KBCCollision3D", "MRTCollision", "CMCollision", "RegularizedCollision",
-    "SmagorinskyCollision", "TRTCollision", "BGKInitialization"
+    "SmagorinskyCollision", "TRTCollision", "BGKInitialization", "LearnedMRT"
 ]
 
 
@@ -343,3 +343,66 @@ class BGKInitialization:
         mnew[self.momentum_indices] = rho * self.u
         f = self.moment_transformation.inverse_transform(mnew)
         return f
+
+class LearnedMRT(torch.nn.Module):
+    def __init__(self, tau, moment_transform, activation=torch.nn.ReLU()):
+        super().__init__()
+        self.__name__ = "Learned collision"
+        self.tau = tau
+        self.trafo = moment_transform  # lt.D2Q9NonOrthoCM
+        # 1st net for higher order moment relaxation: Kxx + Kyy
+        self.xx_net = torch.nn.Sequential(
+            torch.nn.Linear(9,24),
+            activation,
+            torch.nn.Linear(24,1)
+        )
+        # 2nd net for higher order moment relaxtion: Kxx - Kyy
+        self.yy_net = torch.nn.Sequential(
+            torch.nn.Linear(9,24),
+            activation,
+            torch.nn.Linear(24,1)
+        )
+         # 2nd net for higher order moment relaxtion: Kxy
+        self.xy_net = torch.nn.Sequential(
+            torch.nn.Linear(9,24),
+            activation,
+            torch.nn.Linear(24,1)
+        )
+    # def flip_xy(self, m):
+    #     """flip x and y and moments"""
+    #     assert self.trafo.__class__ == D2Q9NonOrthoCM  # other moment sets have different ordering of moments
+    #     return m[:,:,[0,2,1,5,4,3,6,8,7]]
+
+    @staticmethod
+    def gt_half(a, tau):
+        """transform into a value > tau"""
+        return tau + 0.025 * torch.relu(a)  
+    def __call__(self, f):
+        return self.forward(f)
+    def forward(self, f):
+        qdim, nxdim, nydim = f.shape  # ok
+        # transform to moment space
+        m, cm = self.trafo.transform(f)
+        cmt = cm.permute(1, 2, 0)  # grid dimensions are batch dims for the networks #ok
+        assert cmt.shape == (nxdim, nydim, qdim) #ok
+        # determine higher-order moment relaxation parameters
+        tau_pxx = self.gt_half(self.xx_net.forward(cmt), self.tau)
+        tau_pyy = self.gt_half(self.yy_net.forward(cmt), self.tau)
+        tau_pxy = self.gt_half(self.xy_net.forward(cmt), self.tau)
+        # print(str(torch.min(tau_n))+"   "+str(torch.max(tau_n)))
+        # by summing over xy-ordered and yx-ordered, we make tau_n rotation equivariant
+        assert tau_pxx.shape == (nxdim, nydim, 1)
+        assert tau_pyy.shape == (nxdim, nydim, 1)
+        assert tau_pxy.shape == (nxdim, nydim, 1)
+        # assign tau to moments
+        taus = torch.ones_like(m)
+        taus[3] = tau_pxx[...,0]
+        taus[4] = tau_pyy[...,0]
+        taus[5] = tau_pxy[...,0]
+        assert taus.shape == (qdim, nxdim, nydim)
+        # relax
+        cmeq = self.trafo.equilibrium(cm)
+        cm_postcollision = cm - 1./taus * (cm - cmeq)
+        
+        #print(f"tau_max: {torch.max(tau_pxx):2.8e}")
+        return self.trafo.inverse_transform(m, cm_postcollision)

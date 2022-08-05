@@ -11,7 +11,7 @@ import torch
 import pyevtk.hl as vtk
 
 __all__ = [
-    "write_image", "write_vtk", "VTKReporter", "ObservableReporter", "ErrorReporter"
+    "write_image", "write_vtk", "VTKReporter", "TXTReporter", "ObservableReporter", "ErrorReporter"
 ]
 
 
@@ -32,15 +32,16 @@ def write_vtk(point_dict, id=0, filename_base="./data/output"):
                   np.arange(0, point_dict["p"].shape[0]),
                   np.arange(0, point_dict["p"].shape[1]),
                   np.arange(0, point_dict["p"].shape[2]),
-                  pointData=point_dict)
+                  pointData=point_dict)   
 
 
 class VTKReporter:
     """General VTK Reporter for velocity and pressure"""
 
-    def __init__(self, lattice, flow, interval=50, filename_base="./data/output"):
+    def __init__(self, lattice, flow, collision, interval=50, filename_base="./data/output"):
         self.lattice = lattice
         self.flow = flow
+        self.collision = collision
         self.interval = interval
         self.filename_base = filename_base
         directory = os.path.dirname(filename_base)
@@ -50,12 +51,23 @@ class VTKReporter:
 
     def __call__(self, i, t, f):
         if i % self.interval == 0:
+            m, cm = self.collision.trafo.transform(f)
+            cmt = cm.permute(1, 2, 0)  # grid dimensions are batch dims for the networks #ok
+            
             u = self.flow.units.convert_velocity_to_pu(self.lattice.u(f))
             p = self.flow.units.convert_density_lu_to_pressure_pu(self.lattice.rho(f))
+            tau_xx = self.collision.gt_half(self.collision.xx_net.forward(cmt), self.flow.units.relaxation_parameter_lu)
+            tau_xy = self.collision.gt_half(self.collision.xy_net.forward(cmt), self.flow.units.relaxation_parameter_lu)
+            tau_yy = self.collision.gt_half(self.collision.yy_net.forward(cmt), self.flow.units.relaxation_parameter_lu)
+
+
             if self.lattice.D == 2:
                 self.point_dict["p"] = self.lattice.convert_to_numpy(p[0, ..., None])
                 for d in range(self.lattice.D):
                     self.point_dict[f"u{'xyz'[d]}"] = self.lattice.convert_to_numpy(u[d, ..., None])
+                self.point_dict["tau_xx"] = self.lattice.convert_to_numpy(tau_xx-self.flow.units.relaxation_parameter_lu)
+                self.point_dict["tau_xy"] = self.lattice.convert_to_numpy(tau_xy-self.flow.units.relaxation_parameter_lu)
+                self.point_dict["tau_yy"] = self.lattice.convert_to_numpy(tau_yy-self.flow.units.relaxation_parameter_lu)
             else:
                 self.point_dict["p"] = self.lattice.convert_to_numpy(p[0, ...])
                 for d in range(self.lattice.D):
@@ -77,6 +89,28 @@ class VTKReporter:
                       pointData=point_dict)
 
 
+class TXTReporter:
+    """TXT Reporter for velocity and pressure"""
+
+    def __init__(self, lattice, flow, interval=50, filename_base="./data/output"):
+        self.lattice = lattice
+        self.flow = flow
+        self.interval = interval
+        self.filename_base = filename_base
+        directory = os.path.dirname(filename_base)
+        if not os.path.isdir(directory):
+            os.mkdir(directory)
+        self.point_dict = dict()
+
+    def __call__(self, i, t, f):
+        if i % self.interval == 0:
+            rho = self.flow.units.convert_density_to_pu(self.lattice.rho(f)).flatten()
+            u = self.flow.units.convert_velocity_to_pu(self.lattice.u(f))
+            if self.lattice.D == 2:
+                np.savetxt(f"{self.filename_base}_{i}.txt", np.c_[rho.flatten(), u[0].flatten(), u[1].flatten()], header='rho ux uy')
+            else:
+                 np.savetxt(f"{self.filename_base}_{i}.txt", np.c_[rho.flatten(), u[0].flatten(), u[1].flatten(), u[2].flatten()], header = 'rho ux uy uz')
+               
 class ErrorReporter:
     """Reports numerical errors with respect to analytic solution."""
 
